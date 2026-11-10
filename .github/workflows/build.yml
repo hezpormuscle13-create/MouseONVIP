@@ -2,8 +2,11 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -11,25 +14,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Giải nén HezporMouse.zip (nếu có)
-        run: |
-          if [ -f HezporMouse.zip ]; then
-            unzip -o HezporMouse.zip -x ".github/*"
-          fi
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.7
+          gradle-version: '8.9'
 
-      - name: Build
-        run: gradle assembleDebug --no-daemon
+      - name: Accept SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Find project folder (tu giai nen zip neu can)
+        run: |
+          S=$(find . -name settings.gradle -not -path './.git/*' | head -1)
+          if [ -z "$S" ]; then
+            Z=$(find . -maxdepth 2 -name '*.zip' -not -path './.git/*' | head -1)
+            if [ -n "$Z" ]; then
+              echo "Giai nen $Z"
+              mkdir -p _src && unzip -q -o "$Z" -d _src
+              S=$(find _src -name settings.gradle | head -1)
+            fi
+          fi
+          if [ -z "$S" ]; then echo "Khong tim thay settings.gradle"; exit 1; fi
+          echo "PROJECT_DIR=$(dirname "$S")" >> $GITHUB_ENV
+
+      - name: Build debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" HezporMouse.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HezporMouse-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: HezporMouse-APK
+          path: HezporMouse.apk
+
+      - name: Publish release (direct download link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Hezpor Mouse v1.0.${{ github.run_number }}
+          files: HezporMouse.apk
